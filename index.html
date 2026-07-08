@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>BudgetLens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --red:#B81E22; --red-2:#A01B20; --red-3:#8A1418;
+    --red-soft:#FBEAEA; --red-line:#F0E0E0;
+    --ink:#1A1A1A; --t1:#222; --t2:#6A5C5E; --t3:#A89A9C;
+    --bg:#F4EEEE; --card:#fff; --line:#F2EAEA;
+    --green:#2E7D32; --green-soft:#EAF3EA;
+    --gold:#B07D00; --gold-soft:#FBF3D8;
+    --amber:#B0500A; --amber-soft:#FDF0E4;
+    --r:12px; --r-lg:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  body{font-family:'Mulish',-apple-system,BlinkMacSystemFont,sans-serif;
+    background:#F4EEEE;
+    background-image:radial-gradient(circle at 12% 0%,rgba(184,30,34,0.06) 0%,transparent 42%),radial-gradient(circle at 88% 6%,rgba(184,30,34,0.05) 0%,transparent 38%);
+    background-attachment:fixed;color:var(--t1);min-height:100vh;-webkit-text-size-adjust:100%;}
+
+  /* Header */
+  .hd{background:var(--red);background-image:linear-gradient(135deg,#C9282E 0%,var(--red-2) 55%,var(--red-3) 100%);
+    color:#fff;padding:18px 20px 20px;position:relative;overflow:hidden;}
+  .hd::after{content:'';position:absolute;top:-40%;right:-6%;width:220px;height:220px;
+    background:radial-gradient(circle,rgba(255,255,255,0.10) 0%,transparent 70%);pointer-events:none;}
+  .hd-eyebrow{font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;opacity:0.82;position:relative;z-index:1;}
+  .hd-title{font-size:23px;font-weight:800;letter-spacing:-0.4px;margin-top:2px;position:relative;z-index:1;}
+  .hd-sub{font-size:13px;opacity:0.85;margin-top:2px;position:relative;z-index:1;}
+  .hd-refresh{position:absolute;top:18px;right:18px;width:38px;height:38px;border-radius:50%;
+    background:rgba(255,255,255,0.16);border:1px solid rgba(255,255,255,0.15);color:#fff;font-size:17px;cursor:pointer;z-index:2;}
+
+  .page{max-width:1100px;margin:0 auto;padding:16px;}
+
+  /* Tabs (nav) */
+  .tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--red-line);border-radius:12px;padding:5px;margin-bottom:16px;overflow-x:auto;}
+  .tab{flex:1;min-width:max-content;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:700;color:var(--t2);cursor:pointer;text-align:center;white-space:nowrap;border:none;background:none;font-family:inherit;}
+  .tab.on{background:var(--red);color:#fff;}
+
+  /* Metric cards */
+  .metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;}
+  .metric{background:var(--card);background-image:linear-gradient(180deg,#fff,#FFFBFB);border:1px solid var(--red-line);border-radius:14px;padding:14px 16px;box-shadow:0 2px 10px rgba(160,27,32,0.05);}
+  .metric-label{font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:0.5px;}
+  .metric-value{font-size:22px;font-weight:800;margin-top:4px;color:var(--ink);}
+  .metric-value.red{color:var(--red);} .metric-value.green{color:var(--green);} .metric-value.amber{color:var(--amber);}
+  .metric-sub{font-size:11px;color:var(--t3);margin-top:2px;}
+
+  /* Generic card */
+  .card{background:var(--card);border:1px solid var(--red-line);border-radius:16px;padding:16px;margin-bottom:14px;box-shadow:0 2px 10px rgba(160,27,32,0.05);}
+  .card-title{font-size:13px;font-weight:700;color:var(--red-2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;}
+
+  /* Filter bar */
+  .filters{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px;}
+  select,input{font-family:inherit;font-size:14px;padding:9px 11px;border:1px solid var(--red-line);border-radius:9px;background:var(--card);color:var(--t1);}
+  select:focus,input:focus{outline:none;border-color:var(--red);}
+
+  /* Transaction list */
+  .tx{display:flex;align-items:center;gap:12px;padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer;}
+  .tx:last-child{border-bottom:none;}
+  .tx-main{flex:1;min-width:0;}
+  .tx-merchant{font-size:15px;font-weight:700;}
+  .tx-meta{font-size:12px;color:var(--t2);margin-top:2px;}
+  .tx-amt{text-align:right;flex-shrink:0;}
+  .tx-total{font-size:15px;font-weight:700;color:var(--red);}
+  .tx-share{font-size:11px;color:var(--gold);}
+  .pill{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:3px 8px;border-radius:6px;background:var(--red-soft);color:var(--red-2);}
+
+  .btn{background:var(--red);color:#fff;border:none;border-radius:10px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .btn.ghost{background:var(--card);color:var(--red-2);border:1px solid var(--red-line);}
+  .fab{position:fixed;bottom:20px;right:20px;width:54px;height:54px;border-radius:50%;background:var(--red);color:#fff;border:none;font-size:26px;box-shadow:0 4px 16px rgba(160,27,32,0.4);cursor:pointer;z-index:20;}
+
+  .empty{text-align:center;padding:34px 16px;color:var(--t3);font-size:14px;}
+  .spin{width:22px;height:22px;border:2.5px solid var(--red-soft);border-top-color:var(--red);border-radius:50%;animation:sp .7s linear infinite;margin:40px auto;}
+  @keyframes sp{to{transform:rotate(360deg);}}
+  .fade-in{animation:fadeIn .25s ease;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+  .toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;font-size:13px;font-weight:600;padding:10px 18px;border-radius:22px;opacity:0;transition:.25s;z-index:100;pointer-events:none;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  .setup{padding:22px;}
+  .chart-box{position:relative;height:220px;}
+  .chart-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:640px){ .chart-row{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div id="app"><div class="spin"></div></div>
+<button class="fab" id="fab" style="display:none" onclick="onFab()">+</button>
+<div class="toast" id="toast"></div>
+<script>
+// ============================================================
+// BudgetLens v3 — slice 1 (shell: dashboard read + theme)
+// ============================================================
+var API = localStorage.getItem('bl_api') || '';
+var state = { tab:'dashboard', data:null };
+var CATEGORIES = ['Food & Drink','Shopping','Groceries','Accommodation','Transport','Entertainment','Other'];
+var PAYMENTS = ['MariBank','UOB Credit Card','Cash','PayNow','YouTrip','Apple Pay','Other'];
+var CREDIT_METHODS = ['MariBank'];  // methods treated as credit for the repayment view (slice 3)
+var CAT_COLOURS = {
+  'Food & Drink':'#B81E22','Shopping':'#C15B4E','Groceries':'#2E7D32',
+  'Accommodation':'#8A1418','Transport':'#B07D00','Entertainment':'#7C3AED',
+  'Other':'#A89A9C'
+};
+
+function apiGet(action, params){
+  var q='?action='+action;
+  if(params) Object.keys(params).forEach(function(k){ if(params[k]!=null) q+='&'+k+'='+encodeURIComponent(params[k]); });
+  return fetch(API+q).then(function(r){return r.json();});
+}
+function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(function(){t.classList.remove('show');},2000); }
+function esc(s){ var d=document.createElement('div'); d.textContent=(s==null?'':s); return d.innerHTML; }
+function fmt(n){ var v=parseFloat(n); if(isNaN(v)) return '0.00'; return v.toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function paint(html){ var a=document.getElementById('app'); a.innerHTML=html; a.classList.remove('fade-in'); void a.offsetWidth; a.classList.add('fade-in'); }
+
+window.addEventListener('DOMContentLoaded', function(){
+  if(!API){ renderSetup(); return; }
+  loadDashboard();
+});
+
+function renderSetup(){
+  paint('<div class="hd"><div class="hd-eyebrow">BudgetLens</div><div class="hd-title">Setup</div></div>'+
+    '<div class="setup"><label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:6px">Paste your BudgetLens API URL (ends in /exec)</label>'+
+    '<input id="api-in" style="width:100%;margin-bottom:10px" placeholder="https://script.google.com/macros/s/…/exec">'+
+    '<button class="btn" style="width:100%" onclick="saveApi()">Save &amp; start</button></div>');
+}
+function saveApi(){ var v=document.getElementById('api-in').value.trim(); if(!v){toast('Paste the URL');return;} API=v; localStorage.setItem('bl_api',v); loadDashboard(); }
+
+function loadDashboard(){
+  document.getElementById('app').innerHTML='<div class="spin"></div>';
+  document.getElementById('fab').style.display='none';
+  apiGet('getDashboard').then(function(d){
+    if(!d.ok){ toast('Error: '+d.error); return; }
+    state.data=d.data; state.tab='dashboard'; renderShell();
+  }).catch(function(e){ toast('Load failed: '+e.message); });
+}
+
+function tabBtn(id,label){ return '<button class="tab'+(state.tab===id?' on':'')+'" onclick="switchTab(\''+id+'\')">'+label+'</button>'; }
+function switchTab(id){ state.tab=id; renderShell(); }
+
+function renderShell(){
+  var d=state.data;
+  var h='<div class="hd"><button class="hd-refresh" onclick="loadDashboard()">↻</button>'+
+    '<div class="hd-eyebrow">BudgetLens</div>'+
+    '<div class="hd-title">Your money</div>'+
+    '<div class="hd-sub">'+d.totalTransactions+' transactions · '+esc(d.serverTime)+'</div></div>'+
+    '<div class="page">'+
+    '<div class="tabs">'+
+      tabBtn('dashboard','📊 Dashboard')+
+      tabBtn('transactions','🧾 Transactions')+
+      tabBtn('budget','🎯 Budget')+
+      tabBtn('credit','💳 Credit')+
+    '</div><div id="tabbody"></div></div>';
+  paint(h);
+  document.getElementById('fab').style.display='block';
+  renderTab();
+}
+
+function renderTab(){
+  var d=state.data, b=d.budget;
+  var body=document.getElementById('tabbody'); if(!body) return;
+  if(state.tab==='dashboard'){
+    var filteredSpend = d.transactions.reduce(function(s,t){return s+(parseFloat(t.your_share)||0);},0);
+    var pct = b.monthly_budget>0 ? Math.min(100, Math.round(b.spent/b.monthly_budget*100)) : 0;
+    body.innerHTML =
+      '<div class="metric-grid">'+
+        metric('My spend','red','SGD '+fmt(filteredSpend),'this period')+
+        metric('Budget left','green','SGD '+fmt(b.remaining),'of SGD '+fmt(b.monthly_budget))+
+        metric('Transactions','','' +d.totalTransactions,'')+
+        metric('Used','', pct+'%','of monthly budget')+
+      '</div>'+
+      '<div class="card"><div class="card-title">By category</div><div class="chart-box"><canvas id="cat-chart"></canvas></div></div>'+
+      '<div class="card"><div class="card-title">Recent transactions</div><div id="tx-list"></div></div>';
+    renderCatChart(d.categoryBreakdown);
+    renderTxList(d.transactions.slice(0,20));
+  } else if(state.tab==='transactions'){
+    body.innerHTML='<div class="card"><div class="card-title">All transactions</div><div id="tx-list"></div></div>';
+    renderTxList(d.transactions);
+  } else if(state.tab==='budget'){
+    body.innerHTML='<div class="empty">Enhanced budget breakdown arrives in slice 3.<br><br>For now: monthly budget SGD '+fmt(b.monthly_budget)+', spent SGD '+fmt(b.spent)+'.</div>';
+  } else if(state.tab==='credit'){
+    body.innerHTML='<div class="empty">Credit repayment view arrives in slice 3. 💳</div>';
+  }
+}
+
+function metric(label,cls,val,sub){
+  return '<div class="metric"><div class="metric-label">'+esc(label)+'</div>'+
+    '<div class="metric-value '+cls+'">'+esc(val)+'</div>'+
+    (sub?'<div class="metric-sub">'+esc(sub)+'</div>':'')+'</div>';
+}
+
+function renderTxList(txns){
+  var el=document.getElementById('tx-list'); if(!el) return;
+  if(!txns||!txns.length){ el.innerHTML='<div class="empty">No transactions yet. Tap + to add one. 🧾</div>'; return; }
+  el.innerHTML = txns.map(function(t){
+    var isSplit = parseFloat(t.your_share) < parseFloat(t.sgd_amount)-0.01;
+    return '<div class="tx"><div class="tx-main">'+
+      '<div class="tx-merchant">'+esc(t.merchant_en||t.merchant||'—')+'</div>'+
+      '<div class="tx-meta">'+esc(t.date||'')+' · '+esc(t.category||'Other')+(t.location?' · '+esc(t.location):'')+' · '+esc(t.payment_method||'')+'</div></div>'+
+      '<div class="tx-amt"><div class="tx-total">SGD '+fmt(t.sgd_amount)+'</div>'+
+      (isSplit?'<div class="tx-share">my share SGD '+fmt(t.your_share)+'</div>':'')+'</div></div>';
+  }).join('');
+}
+
+var catChart=null;
+function renderCatChart(breakdown){
+  var el=document.getElementById('cat-chart'); if(!el) return;
+  var labels=Object.keys(breakdown), values=labels.map(function(l){return breakdown[l];});
+  if(!labels.length){ el.parentNode.innerHTML='<div class="empty">No spending to chart yet.</div>'; return; }
+  var colors=labels.map(function(l){return CAT_COLOURS[l]||'#D8B0B0';});
+  if(catChart) catChart.destroy();
+  catChart=new Chart(el.getContext('2d'),{type:'doughnut',
+    data:{labels:labels,datasets:[{data:values,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'58%',
+      plugins:{legend:{position:'right',labels:{font:{family:'Mulish',size:12},color:'#6A5C5E',boxWidth:12}},
+        tooltip:{callbacks:{label:function(c){ var tot=values.reduce(function(a,b){return a+b;},0); return ' SGD '+fmt(c.parsed)+' ('+Math.round(c.parsed/tot*100)+'%)'; }}}}}});
+}
+
+function onFab(){ toast('Add transaction arrives in slice 2'); }
+</script>
+</body>
+</html>
