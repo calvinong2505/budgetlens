@@ -111,6 +111,7 @@
   .fg label{font-size:12px;font-weight:600;color:var(--t2);}
   .fg input,.fg select{width:100%;}
   .frow{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media(max-width:480px){ .frow{grid-template-columns:1fr;gap:0;} }
 
   /* split block */
   .split-block{margin-top:6px;padding-top:12px;border-top:1px solid var(--line);}
@@ -157,6 +158,9 @@ function apiPost(payload){
     .then(function(r){ return r.json(); });
 }
 function uuid(){ return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8);return v.toString(16);}); }
+function computeCatBreakdown(txns){
+  var m={}; (txns||[]).forEach(function(t){ var c=t.category||'Other'; m[c]=(m[c]||0)+(parseFloat(t.your_share)||0); }); return m;
+}
 function today(){ var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(function(){t.classList.remove('show');},2000); }
 function esc(s){ var d=document.createElement('div'); d.textContent=(s==null?'':s); return d.innerHTML; }
@@ -236,7 +240,7 @@ function renderTab(){
       '<div class="card"><div class="table-head"><span class="card-title" style="margin:0">Recent transactions</span>'+
         '<button class="btn ghost small" onclick="exportCSV()">↓ CSV</button></div><div id="tx-list"></div></div>';
     populateFilterSelects();
-    renderCatChart(d.categoryBreakdown);
+    renderCatChart(computeCatBreakdown(d.transactions));
     renderTxList(d.transactions.slice(0,25));
   } else if(state.tab==='transactions'){
     body.innerHTML=filterBar()+
@@ -339,9 +343,13 @@ function renderSplitsTab(body){
     }).join('')+'</div>';
 }
 function settle(splitId){
-  apiPost({action:'settleUp',split_id:splitId}).then(function(r){
-    if(r.ok){ toast('Settled'); loadDashboard(true); } else toast('Error: '+r.error);
-  });
+  var d=state.data;
+  var removed=null;
+  d.unsettledSplits=(d.unsettledSplits||[]).filter(function(s){ if(s.split_id===splitId){removed=s;return false;} return true; });
+  if(removed) d.owedToYou=Math.round((d.owedToYou-removed.share_sgd)*100)/100;
+  toast('Settled'); renderShell();
+  apiPost({action:'settleUp',split_id:splitId}).then(function(r){ if(!r.ok){ toast('Failed — refreshing'); loadDashboard(true); } })
+    .catch(function(){ toast('Failed — refreshing'); loadDashboard(true); });
 }
 
 // ============ Budget tab (monthly — enhanced breakdown in slice 3) ============
@@ -410,8 +418,8 @@ function txForm(t){
     '<div class="fg"><label>English name</label><input id="x-merchant-en" value="'+esc(t.merchant_en||'')+'" placeholder="If non-Latin above"></div>'+
     '<div class="frow"><div class="fg"><label>Date</label><input id="x-date" type="date" value="'+esc(t.date||today())+'"></div>'+
     '<div class="fg"><label>Category</label><select id="x-category">'+CATEGORIES.map(function(c){return '<option'+(t.category===c?' selected':'')+'>'+c+'</option>';}).join('')+'</select></div></div>'+
-    '<div class="frow"><div class="fg"><label>Amount</label><input id="x-amount" type="number" inputmode="decimal" step="0.01" value="'+(t.original_amount||'')+'" oninput="onAmtChange()"></div>'+
-    '<div class="fg"><label>Currency</label><input id="x-currency" maxlength="3" style="text-transform:uppercase" value="'+esc(t.original_currency||'SGD')+'" oninput="onAmtChange()"></div></div>'+
+    '<div class="frow"><div class="fg"><label>Amount</label><input id="x-amount" type="number" inputmode="decimal" step="0.01" value="'+(t.original_amount||'')+'" oninput="onAmtChange()" onblur="onAmtChange()"></div>'+
+    '<div class="fg"><label>Currency</label><input id="x-currency" maxlength="3" style="text-transform:uppercase" value="'+esc(t.original_currency||'SGD')+'" oninput="onAmtChange()" onblur="onAmtChange()"></div></div>'+
     '<div class="frow"><div class="fg"><label>SGD equivalent</label><input id="x-sgd" type="number" inputmode="decimal" step="0.01" value="'+(t.sgd_amount||'')+'"></div>'+
     '<div class="fg"><label>Payment</label><select id="x-payment">'+PAYMENTS.map(function(p){return '<option'+(t.payment_method===p?' selected':'')+'>'+p+'</option>';}).join('')+'</select></div></div>'+
     '<div class="frow"><div class="fg"><label>Location</label><input id="x-location" value="'+esc(t.location||'')+'" placeholder="e.g. Barcelona"></div>'+
@@ -460,8 +468,16 @@ function onAmtChange(){
   var ccy=(val2('x-currency')||'SGD').toUpperCase();
   var amt=parseFloat(val2('x-amount'))||0;
   var sgdEl=document.getElementById('x-sgd');
-  if(ccy==='SGD'){ if(sgdEl) sgdEl.value=amt||''; return; }
-  if(amt>0){ apiGet('convert',{amount:amt,currency:ccy}).then(function(r){ if(r.ok&&sgdEl&&!sgdEl.dataset.touched) sgdEl.value=r.sgd; }); }
+  if(!sgdEl) return;
+  if(ccy==='SGD'){ sgdEl.value=amt||''; return; }
+  // only convert when we have a full 3-letter code + an amount
+  if(ccy.length===3 && amt>0){
+    sgdEl.placeholder='converting…';
+    apiGet('convert',{amount:amt,currency:ccy}).then(function(r){
+      if(r.ok && r.sgd){ sgdEl.value=r.sgd; sgdEl.placeholder=''; }
+      else sgdEl.placeholder='';
+    }).catch(function(){ sgdEl.placeholder=''; });
+  }
 }
 function val2(id){ var el=document.getElementById(id); return el?el.value:''; }
 
@@ -524,19 +540,38 @@ function saveTx(){
   var sgd=parseFloat(val2('x-sgd'))||amt;
   var isSplit=document.getElementById('x-split').checked;
   var sp=isSplit?collectSplits(sgd):{splits:[],yourShare:sgd};
-  var txn={ id: editingId||uuid(), merchant:merchant, merchant_en:val2('x-merchant-en').trim()||merchant,
+  var id=editingId||uuid();
+  var txn={ id:id, merchant:merchant, merchant_en:val2('x-merchant-en').trim()||merchant,
     date:val2('x-date')||today(), category:val2('x-category'), location:val2('x-location').trim(),
     payment_method:val2('x-payment'), original_amount:amt, original_currency:ccy, sgd_amount:sgd,
     your_share:sp.yourShare, notes:val2('x-notes').trim(), source: editingId?undefined:'manual' };
-  var action = editingId ? 'updateTransaction' : 'addTransaction';
-  var payload = editingId ? {action:action,id:editingId,txn:txn,splits:sp.splits} : {action:action,txn:txn,splits:sp.splits};
-  closeModal(); toast('Saving…');
-  apiPost(payload).then(function(r){ if(r.ok){ toast('Saved'); loadDashboard(true); } else toast('Error: '+r.error); });
+  var wasEditing=!!editingId;
+  var action = wasEditing ? 'updateTransaction' : 'addTransaction';
+  var payload = wasEditing ? {action:action,id:id,txn:txn,splits:sp.splits} : {action:action,txn:txn,splits:sp.splits};
+
+  // optimistic: update local cache + re-render immediately
+  var d=state.data;
+  var localTxn={}; for(var k in txn) localTxn[k]=txn[k];
+  localTxn.repaid=false; localTxn.trip_id=localTxn.trip_id||'';
+  if(wasEditing){
+    for(var i=0;i<d.transactions.length;i++){ if(d.transactions[i].id===id){ d.transactions[i]=localTxn; break; } }
+  } else {
+    d.transactions.unshift(localTxn);
+    d.totalTransactions=(d.totalTransactions||0)+1;
+  }
+  closeModal(); toast(wasEditing?'Updated':'Saved'); renderShell();
+
+  apiPost(payload).then(function(r){ if(!r.ok){ toast('Save failed — refreshing'); loadDashboard(true); } })
+    .catch(function(){ toast('Save failed — refreshing'); loadDashboard(true); });
 }
 function deleteTx(id){
   if(!confirm('Delete this transaction?')) return;
-  closeModal(); toast('Deleting…');
-  apiPost({action:'deleteTransaction',id:id}).then(function(r){ if(r.ok){ toast('Deleted'); loadDashboard(true); } else toast('Error: '+r.error); });
+  var d=state.data;
+  d.transactions=d.transactions.filter(function(t){return t.id!==id;});
+  d.totalTransactions=Math.max(0,(d.totalTransactions||1)-1);
+  closeModal(); toast('Deleted'); renderShell();
+  apiPost({action:'deleteTransaction',id:id}).then(function(r){ if(!r.ok){ toast('Delete failed — refreshing'); loadDashboard(true); } })
+    .catch(function(){ toast('Delete failed — refreshing'); loadDashboard(true); });
 }
 
 // ============ Receipt scan ============
