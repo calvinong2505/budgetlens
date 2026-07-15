@@ -103,8 +103,40 @@
   .modal-title{font-size:16px;font-weight:800;}
   .modal-x{background:none;border:none;font-size:20px;color:var(--t3);cursor:pointer;width:36px;height:36px;}
   .modal-body{padding:16px 18px;}
-  .modal-foot{display:flex;gap:10px;padding:12px 18px 20px;position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line);}
-  .modal-foot .btn{flex:1;}
+  .modal-foot{display:flex;gap:10px;padding:12px 18px 20px;position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line);align-items:stretch;}
+  .modal-foot .btn{flex:1 1 0;min-width:0;text-align:center;}
+
+  /* category budget breakdown */
+  .cat-bd{padding:12px 4px;border-bottom:1px solid var(--line);cursor:pointer;}
+  .cat-bd:last-child{border-bottom:none;}
+  .cat-bd-head{display:flex;align-items:center;gap:8px;}
+  .cat-bd-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+  .cat-bd-name{font-size:14px;font-weight:700;flex:1;}
+  .cat-bd-amt{font-size:14px;font-weight:700;}
+  .cat-bd-bar{height:6px;background:var(--red-soft);border-radius:3px;overflow:hidden;margin:7px 0 5px;}
+  .cat-bd-bar>div{height:100%;border-radius:3px;transition:width .3s;}
+  .cat-bd-status{font-size:11px;font-weight:600;}
+  .cat-bd-days{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);}
+  .day-row{display:flex;align-items:center;gap:8px;padding:3px 0;}
+  .day-label{font-size:11px;color:var(--t2);width:52px;flex-shrink:0;}
+  .day-bar{flex:1;height:5px;background:var(--red-soft);border-radius:3px;overflow:hidden;}
+  .day-bar>span{display:block;height:100%;background:var(--red);border-radius:3px;}
+  .day-amt{font-size:11px;color:var(--t2);width:74px;text-align:right;flex-shrink:0;}
+
+  /* credit statements */
+  .stmt{padding:0;overflow:hidden;}
+  .stmt-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;}
+  .stmt-date{font-size:15px;font-weight:800;}
+  .stmt-due{font-size:12px;color:var(--t2);margin-top:2px;}
+  .stmt-total{font-size:16px;font-weight:800;color:var(--red);}
+  .stmt-paid{font-size:11px;font-weight:700;color:var(--green);}
+  .stmt-unpaid{font-size:11px;font-weight:700;color:var(--gold);}
+  .stmt-body{padding:0 16px 14px;border-top:1px solid var(--line);}
+  .stmt-tx{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);}
+  .stmt-tx:last-of-type{border-bottom:none;}
+  .stmt-tx-m{font-size:14px;font-weight:600;}
+  .stmt-tx-meta{font-size:11px;color:var(--t2);margin-top:1px;}
+  .stmt-tx-amt{font-size:14px;font-weight:700;flex-shrink:0;}
 
   /* form fields */
   .fg{display:flex;flex-direction:column;gap:5px;margin-bottom:11px;}
@@ -199,8 +231,15 @@ function loadDashboard(keepTab){
   }).catch(function(e){ toast('Load failed: '+e.message); });
 }
 
-function tabBtn(id,label){ return '<button class="tab'+(state.tab===id?' on':'')+'" onclick="switchTab(\''+id+'\')">'+label+'</button>'; }
-function switchTab(id){ state.tab=id; renderShell(); }
+function tabBtn(id,label){ return '<button id="tab-'+id+'" class="tab'+(state.tab===id?' on':'')+'" onclick="switchTab(\''+id+'\')">'+label+'</button>'; }
+function switchTab(id){
+  state.tab=id;
+  // update active class only — do NOT rebuild the tab strip (preserves its scroll position)
+  var tabs=document.querySelectorAll('.tab');
+  for(var i=0;i<tabs.length;i++) tabs[i].classList.remove('on');
+  var active=document.getElementById('tab-'+id); if(active) active.classList.add('on');
+  renderTab();
+}
 
 function renderShell(){
   var d=state.data;
@@ -251,7 +290,7 @@ function renderTab(){
   } else if(state.tab==='budget'){
     renderBudgetTab(body);
   } else if(state.tab==='credit'){
-    body.innerHTML='<div class="empty">Credit repayment view arrives in slice 3. 💳</div>';
+    renderCreditTab(body);
   } else if(state.tab==='splits'){
     renderSplitsTab(body);
   }
@@ -352,7 +391,7 @@ function settle(splitId){
     .catch(function(){ toast('Failed — refreshing'); loadDashboard(true); });
 }
 
-// ============ Budget tab (monthly — enhanced breakdown in slice 3) ============
+// ============ Budget tab (enhanced: monthly + per-category breakdown) ============
 function renderBudgetTab(body){
   var b=state.data.budget;
   var pct=b.monthly_budget>0?Math.min(100,Math.round(b.spent/b.monthly_budget*100)):0;
@@ -376,13 +415,124 @@ function renderBudgetTab(body){
         '<div style="height:100%;width:'+pct+'%;background:'+(pct>90?'var(--red)':pct>70?'var(--gold)':'var(--green)')+'"></div></div>'+
       '<div style="font-size:12px;color:var(--t2);margin-top:6px">'+pct+'% used · SGD '+fmt(Math.round(rate*100)/100)+'/day average</div>'+
     '</div>'+
-    '<div class="empty" style="padding:16px">Per-category budgets &amp; day-by-day breakdown arrive in slice 3.</div>';
+    '<div class="card"><div class="table-head"><span class="card-title" style="margin:0">Category budgets</span>'+
+      '<button class="btn ghost small" onclick="openCatBudgets()">Set budgets</button></div>'+
+      '<div id="cat-breakdown"><div class="spin"></div></div></div>';
+  loadBudgetBreakdown();
+}
+
+function loadBudgetBreakdown(){
+  apiGet('getBudgetBreakdown').then(function(r){
+    if(!r.ok){ document.getElementById('cat-breakdown').innerHTML='<div class="empty">Could not load.</div>'; return; }
+    state.catBudgets=r.categoryBudgets||{};
+    renderBreakdown(r.breakdown);
+  });
+}
+function renderBreakdown(bd){
+  var el=document.getElementById('cat-breakdown'); if(!el) return;
+  var cats=bd.categories||[];
+  if(!cats.length){ el.innerHTML='<div class="empty">No spending or budgets yet this month.</div>'; return; }
+  el.innerHTML='<div style="font-size:12px;color:var(--t3);margin-bottom:10px">'+esc(bd.month)+' · day '+bd.day_of_month+' of '+bd.days_in_month+'</div>'+
+    cats.map(function(c){
+      var hasBudget=c.budget>0;
+      var barPct=hasBudget?Math.min(100,Math.round(c.actual/c.budget*100)):0;
+      var barColor=!hasBudget?'var(--t3)':(c.actual>c.budget?'var(--red)':c.on_track?'var(--green)':'var(--gold)');
+      var status=!hasBudget?'<span style="color:var(--t3)">no budget set</span>':
+        (c.actual>c.budget?'<span style="color:var(--red)">⚠ over by SGD '+fmt(c.actual-c.budget)+'</span>':
+         c.on_track?'<span style="color:var(--green)">✓ on track</span>':
+         '<span style="color:var(--gold)">above pace</span>');
+      return '<div class="cat-bd" onclick="toggleCatDays(this)">'+
+        '<div class="cat-bd-head"><span class="cat-bd-dot" style="background:'+(CAT_COLOURS[c.category]||'#D8B0B0')+'"></span>'+
+        '<span class="cat-bd-name">'+esc(c.category)+'</span>'+
+        '<span class="cat-bd-amt">SGD '+fmt(c.actual)+(hasBudget?' <span style="color:var(--t3)">/ '+fmt(c.budget)+'</span>':'')+'</span></div>'+
+        '<div class="cat-bd-bar"><div style="width:'+barPct+'%;background:'+barColor+'"></div></div>'+
+        '<div class="cat-bd-status">'+status+'</div>'+
+        '<div class="cat-bd-days" style="display:none">'+renderDays(c.daily)+'</div>'+
+        '</div>';
+    }).join('');
+}
+function renderDays(daily){
+  var keys=Object.keys(daily||{}).sort().reverse();
+  if(!keys.length) return '<div style="font-size:12px;color:var(--t3);padding:6px 0">No spending days.</div>';
+  var max=Math.max.apply(null,keys.map(function(k){return daily[k];}));
+  return keys.map(function(k){
+    var v=daily[k], w=max>0?Math.round(v/max*100):0;
+    var p=k.split('-'); var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var label=p[2]+' '+MON[parseInt(p[1],10)-1];
+    return '<div class="day-row"><span class="day-label">'+label+'</span>'+
+      '<span class="day-bar"><span style="width:'+w+'%"></span></span>'+
+      '<span class="day-amt">SGD '+fmt(v)+'</span></div>';
+  }).join('');
+}
+function toggleCatDays(el){
+  var d=el.querySelector('.cat-bd-days');
+  if(d) d.style.display = d.style.display==='none' ? 'block' : 'none';
+}
+
+function openCatBudgets(){
+  var cb=state.catBudgets||{};
+  modalShell('Category budgets',
+    '<div style="font-size:12px;color:var(--t3);margin-bottom:12px">Set a monthly budget per category (SGD). Leave blank for no budget.</div>'+
+    CATEGORIES.map(function(c){
+      return '<div class="fg"><label>'+esc(c)+'</label><input class="catbud" data-cat="'+esc(c)+'" type="number" inputmode="decimal" step="1" value="'+(cb[c]||'')+'" placeholder="none"></div>';
+    }).join(''),
+    '<button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveCatBudgets()">Save all</button>');
+}
+function saveCatBudgets(){
+  var inputs=document.querySelectorAll('.catbud');
+  var calls=[];
+  inputs.forEach(function(inp){
+    var cat=inp.getAttribute('data-cat'); var v=parseFloat(inp.value)||0;
+    calls.push(apiPost({action:'setCategoryBudget',category:cat,amount:v}));
+  });
+  closeModal(); toast('Saving budgets…');
+  Promise.all(calls).then(function(){ toast('Budgets saved'); loadBudgetBreakdown(); });
 }
 function saveBudget(){
   var v=parseFloat(document.getElementById('bud-in').value);
   if(!v||v<=0){ toast('Enter a valid amount'); return; }
   apiPost({action:'updateBudget',amount:v}).then(function(r){
     if(r.ok){ toast('Budget updated'); loadDashboard(true); } else toast('Error: '+r.error);
+  });
+}
+
+// ============ Credit repayment tab ============
+function renderCreditTab(body){
+  body.innerHTML='<div class="card"><div class="card-title">💳 MariBank statements</div>'+
+    '<div style="font-size:12px;color:var(--t3);margin-bottom:6px">Statement on the 21st · due the 5th. Tap a statement to see its transactions and tick them against your bill.</div></div>'+
+    '<div id="credit-list"><div class="spin"></div></div>';
+  apiGet('getCredit').then(function(r){
+    var el=document.getElementById('credit-list'); if(!el) return;
+    if(!r.ok){ el.innerHTML='<div class="empty">Could not load.</div>'; return; }
+    var st=r.statements||[];
+    if(!st.length){ el.innerHTML='<div class="empty">No MariBank transactions yet. 💳</div>'; return; }
+    el.innerHTML=st.map(function(s){
+      return '<div class="card stmt"><div class="stmt-head" onclick="toggleStmt(this)">'+
+        '<div><div class="stmt-date">Statement '+esc(s.statement_date)+'</div>'+
+        '<div class="stmt-due">Due '+esc(s.due_date)+' · '+s.count+' transaction'+(s.count!==1?'s':'')+'</div></div>'+
+        '<div style="text-align:right"><div class="stmt-total">SGD '+fmt(s.total)+'</div>'+
+        (s.all_repaid?'<div class="stmt-paid">✓ repaid</div>':'<div class="stmt-unpaid">outstanding</div>')+'</div></div>'+
+        '<div class="stmt-body" style="display:none">'+
+          s.transactions.map(function(t){
+            return '<div class="stmt-tx"><div style="flex:1;min-width:0"><div class="stmt-tx-m">'+esc(t.merchant||'—')+'</div>'+
+              '<div class="stmt-tx-meta">'+esc(t.date)+' · '+esc(t.category||'')+'</div></div>'+
+              '<div class="stmt-tx-amt">SGD '+fmt(t.sgd_amount)+'</div></div>';
+          }).join('')+
+          '<button class="btn '+(s.all_repaid?'ghost':'')+'" style="width:100%;margin-top:10px" onclick="event.stopPropagation();toggleRepaid(\''+s.key+'\','+(!s.all_repaid)+')">'+
+            (s.all_repaid?'Mark as not repaid':'✓ Mark statement repaid')+'</button>'+
+        '</div></div>';
+    }).join('');
+  });
+}
+function toggleStmt(el){
+  var b=el.parentNode.querySelector('.stmt-body');
+  if(b) b.style.display = b.style.display==='none' ? 'block' : 'none';
+}
+function toggleRepaid(key, repaid){
+  toast(repaid?'Marking repaid…':'Updating…');
+  apiPost({action:'setStatementRepaid',statementKey:key,repaid:repaid}).then(function(r){
+    if(r.ok){ toast(repaid?'Marked repaid':'Updated'); renderCreditTab(document.getElementById('tabbody')); loadDashboard(true); }
+    else toast('Error: '+r.error);
   });
 }
 
@@ -601,7 +751,7 @@ function handleReceipt(e){
       document.getElementById('scan-form').innerHTML=txForm({
         merchant:d.merchant_original||d.merchant_en||'', merchant_en:d.merchant_en||d.merchant_original||'',
         date:d.date||today(), original_amount:d.total_amount||'', original_currency:(d.currency||'SGD').toUpperCase(),
-        sgd_amount:d.sgd_amount||d.total_amount||'', category:d.category||'Other'
+        sgd_amount:d.sgd_amount||d.total_amount||'', category:d.category||'Other', location:d.location||''
       });
       editingId=null;
       document.getElementById('scan-save').style.display='inline-flex';
