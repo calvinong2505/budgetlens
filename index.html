@@ -139,6 +139,16 @@
   .stmt-tx-meta{font-size:11px;color:var(--t2);margin-top:1px;}
   .stmt-tx-amt{font-size:14px;font-weight:700;flex-shrink:0;}
 
+  /* trip days */
+  .trip-day{padding:0;overflow:hidden;}
+  .trip-day-head{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;cursor:pointer;}
+  .trip-day-label{font-size:15px;font-weight:800;}
+  .trip-day-count{font-size:12px;color:var(--t2);margin-left:8px;}
+  .trip-day-total{font-size:16px;font-weight:800;color:var(--red);}
+  .trip-day-total.over{color:var(--red);}
+  .trip-day-planned{font-size:11px;color:var(--t3);}
+  .trip-day-body{padding:0 16px 14px;border-top:1px solid var(--line);}
+
   /* form fields */
   .fg{display:flex;flex-direction:column;gap:5px;margin-bottom:11px;min-width:0;}
   .fg label{font-size:12px;font-weight:600;color:var(--t2);}
@@ -171,6 +181,7 @@
 // ============================================================
 var API = localStorage.getItem('bl_api') || '';
 var state = { tab:'dashboard', data:null };
+var tripsCache=null;
 var CATEGORIES = ['Food & Drink','Shopping','Groceries','Accommodation','Transport','Entertainment','Other'];
 var PAYMENTS = ['MariBank','UOB Credit Card','Cash','PayNow','YouTrip','Apple Pay','Other'];
 var CREDIT_METHODS = ['MariBank'];  // methods treated as credit for the repayment view (slice 3)
@@ -229,6 +240,7 @@ function loadDashboard(keepTab){
   apiGet('getDashboard', params).then(function(d){
     if(!d.ok){ toast('Error: '+d.error); return; }
     state.data=d.data; if(!keepTab) state.tab='dashboard'; renderShell();
+    if(tripsCache===null){ apiGet('getTrips').then(function(tr){ if(tr.ok && tr.trips && !tr.trips.error) tripsCache=tr.trips; }); }
   }).catch(function(e){ toast('Load failed: '+e.message); });
 }
 
@@ -255,6 +267,7 @@ function renderShell(){
       tabBtn('splits','👥 Splits'+(d.unsettledSplits&&d.unsettledSplits.length?' ('+d.unsettledSplits.length+')':''))+
       tabBtn('budget','🎯 Budget')+
       tabBtn('credit','💳 Credit')+
+      tabBtn('trips','✈️ Trips')+
     '</div><div id="tabbody"></div></div>';
   paint(h);
   document.getElementById('fab').style.display='block';
@@ -292,6 +305,8 @@ function renderTab(){
     renderBudgetTab(body);
   } else if(state.tab==='credit'){
     renderCreditTab(body);
+  } else if(state.tab==='trips'){
+    renderTripsTab(body);
   } else if(state.tab==='splits'){
     renderSplitsTab(body);
   }
@@ -537,6 +552,91 @@ function toggleRepaid(key, repaid){
   });
 }
 
+// ============ Trips tab (EuroTrip integration) ============
+function renderTripsTab(body){
+  body.innerHTML='<div class="card"><div class="card-title">✈️ Trip expenses</div>'+
+    '<div style="font-size:12px;color:var(--t3)">Tag expenses to a EuroTrip trip and see spending by day — Pre-trip, Day 1, Day 2… — against your planned costs.</div></div>'+
+    '<div id="trips-body"><div class="spin"></div></div>';
+  apiGet('getTrips').then(function(r){
+    var el=document.getElementById('trips-body'); if(!el) return;
+    if(!r.ok || (r.trips&&r.trips.error)){ el.innerHTML='<div class="empty">Could not read trips from EuroTrip.<br><span style="font-size:12px">'+esc((r.trips&&r.trips.error)||r.error||'')+'</span></div>'; return; }
+    tripsCache=r.trips||[];
+    if(!tripsCache.length){ el.innerHTML='<div class="empty">No trips found in EuroTrip yet. ✈️</div>'; return; }
+    if(!state.selectedTrip) state.selectedTrip=tripsCache[0].trip_id;
+    el.innerHTML='<div class="card"><label style="font-size:12px;font-weight:600;color:var(--t2)">Trip</label>'+
+      '<select id="trip-picker" onchange="onTripPick()" style="margin-top:6px">'+
+      tripsCache.map(function(t){ return '<option value="'+esc(t.trip_id)+'"'+(state.selectedTrip===t.trip_id?' selected':'')+'>'+esc(t.destination)+'</option>'; }).join('')+
+      '</select></div><div id="trip-detail"><div class="spin"></div></div>';
+    loadTripDetail();
+  });
+}
+function onTripPick(){ state.selectedTrip=document.getElementById('trip-picker').value; loadTripDetail(); }
+
+function loadTripDetail(){
+  var el=document.getElementById('trip-detail'); if(el) el.innerHTML='<div class="spin"></div>';
+  apiGet('getTripExpenses',{trip_id:state.selectedTrip}).then(function(r){
+    if(!r.ok){ if(el) el.innerHTML='<div class="empty">'+esc(r.error||'Could not load')+'</div>'; return; }
+    renderTripDetail(r);
+  });
+}
+function renderTripDetail(r){
+  var el=document.getElementById('trip-detail'); if(!el) return;
+  var pctPlanned=r.planned>0?Math.round(r.total/r.planned*100):0;
+  var h='<div class="metric-grid" style="margin-bottom:12px">'+
+    metric('Actual spend','red','SGD '+fmt(r.total),'your share')+
+    metric('Planned','', 'SGD '+fmt(r.planned),'from itinerary')+
+    metric('vs planned', r.planned>0?(r.total>r.planned?'red':'green'):'', r.planned>0?pctPlanned+'%':'—', r.planned>0?(r.total>r.planned?'over plan':'under plan'):'no plan set')+
+  '</div>';
+  if(!r.days.length){ h+='<div class="empty">No expenses tagged to this trip yet.<br><span style="font-size:12px">Tag a transaction to this trip from its edit screen.</span></div>'; el.innerHTML=h; return; }
+  h+=r.days.map(function(d){
+    var over=d.planned>0&&d.total>d.planned;
+    return '<div class="card trip-day"><div class="trip-day-head" onclick="toggleTripDay(this)">'+
+      '<div><span class="trip-day-label">'+esc(d.label)+'</span>'+
+      '<span class="trip-day-count">'+d.count+' item'+(d.count!==1?'s':'')+'</span></div>'+
+      '<div style="text-align:right"><div class="trip-day-total'+(over?' over':'')+'">SGD '+fmt(d.total)+'</div>'+
+      (d.planned>0?'<div class="trip-day-planned">of SGD '+fmt(d.planned)+' planned</div>':'')+'</div></div>'+
+      '<div class="trip-day-body" style="display:none">'+
+        d.transactions.map(function(t){
+          return '<div class="stmt-tx"><div style="flex:1;min-width:0"><div class="stmt-tx-m">'+esc(t.merchant||'—')+'</div>'+
+            '<div class="stmt-tx-meta">'+esc(t.date)+' · '+esc(t.category||'')+(t.trip_day_override?' · <span style="color:var(--gold)">moved to '+esc(t.trip_day_override)+'</span>':'')+'</div></div>'+
+            '<div class="stmt-tx-amt">SGD '+fmt(t.your_share)+'</div>'+
+            '<button class="btn ghost small" style="margin-left:8px" onclick="event.stopPropagation();openTripTag(\''+t.id+'\')">Move</button></div>';
+        }).join('')+
+      '</div></div>';
+  }).join('');
+  el.innerHTML=h;
+}
+function toggleTripDay(el){
+  var b=el.parentNode.querySelector('.trip-day-body');
+  if(b) b.style.display=b.style.display==='none'?'block':'none';
+}
+
+// tag a transaction to the current trip (from the edit modal) or move its day
+function openTripTag(txId){
+  var trip=null; for(var i=0;i<(tripsCache||[]).length;i++){ if(tripsCache[i].trip_id===state.selectedTrip){trip=tripsCache[i];break;} }
+  if(!trip) return;
+  // build day options: Pre-trip, Day 1..N (from trip length), Post-trip
+  var opts=['(auto by date)','Pre-trip'];
+  if(trip.start_date&&trip.end_date){
+    var days=dayCountBetween(trip.start_date,trip.end_date);
+    for(var dn=1;dn<=days;dn++) opts.push('Day '+dn);
+  } else { for(var k=1;k<=7;k++) opts.push('Day '+k); }
+  opts.push('Post-trip');
+  modalShell('Move expense',
+    '<div style="font-size:13px;color:var(--t2);margin-bottom:12px">Choose which day of <b>'+esc(trip.destination)+'</b> this expense counts toward. "Auto by date" uses the transaction date.</div>'+
+    '<div class="fg"><label>Trip day</label><select id="tag-day">'+opts.map(function(o){return '<option>'+esc(o)+'</option>';}).join('')+'</select></div>',
+    '<button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveTripTag(\''+txId+'\')">Save</button>');
+}
+function dayCountBetween(a,b){ var pa=a.split('-'),pb=b.split('-'); var da=Date.UTC(+pa[0],+pa[1]-1,+pa[2]),db=Date.UTC(+pb[0],+pb[1]-1,+pb[2]); return Math.round((db-da)/86400000)+1; }
+function saveTripTag(txId){
+  var day=document.getElementById('tag-day').value;
+  var override=(day==='(auto by date)')?'':day;
+  closeModal(); toast('Updating…');
+  apiPost({action:'setTripTag',id:txId,trip_id:state.selectedTrip,trip_day_override:override}).then(function(r){
+    if(r.ok){ toast('Updated'); loadTripDetail(); } else toast('Error: '+r.error);
+  });
+}
+
 // ============ CSV export ============
 function exportCSV(){
   var txns=state.data.transactions||[];
@@ -575,6 +675,9 @@ function txForm(t){
     '<div class="fg"><label>Payment</label><select id="x-payment">'+PAYMENTS.map(function(p){return '<option'+(t.payment_method===p?' selected':'')+'>'+p+'</option>';}).join('')+'</select></div></div>'+
     '<div class="frow"><div class="fg"><label>Location</label><input id="x-location" value="'+esc(t.location||'')+'" placeholder="e.g. Barcelona"></div>'+
     '<div class="fg"><label>Notes</label><input id="x-notes" value="'+esc(t.notes||'')+'" placeholder="Optional"></div></div>'+
+    '<div class="fg"><label>Trip (optional)</label><select id="x-trip"><option value="">— not a trip expense —</option>'+
+      (tripsCache||[]).map(function(tr){return '<option value="'+esc(tr.trip_id)+'"'+(t.trip_id===tr.trip_id?' selected':'')+'>'+esc(tr.destination)+'</option>';}).join('')+
+      '</select></div>'+
     splitBlock();
 }
 function splitBlock(){
@@ -695,7 +798,7 @@ function saveTx(){
   var txn={ id:id, merchant:merchant, merchant_en:val2('x-merchant-en').trim()||merchant,
     date:val2('x-date')||today(), category:val2('x-category'), location:val2('x-location').trim(),
     payment_method:val2('x-payment'), original_amount:amt, original_currency:ccy, sgd_amount:sgd,
-    your_share:sp.yourShare, notes:val2('x-notes').trim(), source: editingId?undefined:'manual' };
+    your_share:sp.yourShare, notes:val2('x-notes').trim(), trip_id:val2('x-trip')||'', source: editingId?undefined:'manual' };
   var wasEditing=!!editingId;
   var action = wasEditing ? 'updateTransaction' : 'addTransaction';
   var payload = wasEditing ? {action:action,id:id,txn:txn,splits:sp.splits} : {action:action,txn:txn,splits:sp.splits};
